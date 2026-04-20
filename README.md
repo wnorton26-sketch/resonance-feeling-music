@@ -6,8 +6,8 @@
 
 One static page: procedural audio, a dark visualization window, optional mic/file, and song suggestions from public APIs.
 
-[![Stack](https://img.shields.io/badge/stack-HTML_·_CSS_·_JS-0d4a3a?style=for-the-badge&labelColor=1a1811)](https://github.com/wnorton26-sketch/Feeling-music-)
-[![Repo](https://img.shields.io/badge/GitHub-Feeling--music--181717?style=for-the-badge&logo=github)](https://github.com/wnorton26-sketch/Feeling-music-)
+[![Stack](https://img.shields.io/badge/stack-HTML_·_CSS_·_JS-0d4a3a?style=for-the-badge&labelColor=1a1811)](https://github.com/wnorton26-sketch/resonance-feeling-music)
+[![Repo](https://img.shields.io/badge/GitHub-resonance--feeling--music-181717?style=for-the-badge&logo=github)](https://github.com/wnorton26-sketch/resonance-feeling-music)
 
 <br />
 
@@ -79,7 +79,7 @@ python3 -m http.server 8080
 ## Repo layout
 
 ```
-Feeling-music-/
+resonance-feeling-music/
 ├── index.html    # Markup, styles, script (single file)
 ├── README.md
 └── .gitignore
@@ -89,7 +89,11 @@ Feeling-music-/
 
 ## Repository
 
-**[github.com/wnorton26-sketch/Feeling-music-](https://github.com/wnorton26-sketch/Feeling-music-)**
+**[github.com/wnorton26-sketch/resonance-feeling-music](https://github.com/wnorton26-sketch/resonance-feeling-music)**
+
+## Live site
+
+**[wnorton26-sketch.github.io/resonance-feeling-music](https://wnorton26-sketch.github.io/resonance-feeling-music/)**
 
 ---
 
