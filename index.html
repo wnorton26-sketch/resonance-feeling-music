@@ -1,0 +1,1902 @@
+<!DOCTYPE html>
+<!--
+  Resonance / Feeling Music — single-page app:
+  - Mood-based Web Audio synthesis + compressor + analyzer
+  - Canvas visualization (spectrum, waveform, particles)
+  - Optional mic / file input; Deezer/iTunes song suggestions
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Resonance</title>
+  <style>
+    /* Apple Music–inspired dark UI + catalog search */
+    :root {
+      --bg: #000000;
+      --elevated: #1c1c1e;
+      --elevated2: #2c2c2e;
+      --label: #8e8e93;
+      --text: #fff;
+      --separator: rgba(255, 255, 255, 0.12);
+      --music-pink: #fa243c;
+      --music-pink-dim: #ff375f;
+      --accent-chill: #5ac8fa;
+      --accent-happy: #ffd60a;
+      --accent-angry: #ff453a;
+      --accent-melancholy: #bf5af2;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      background: var(--bg);
+      position: relative;
+    }
+
+    .ambient {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      background: var(--bg);
+      transition: background 1.2s ease;
+    }
+
+    .ambient::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+      opacity: 1;
+      pointer-events: none;
+    }
+
+    .am-topbar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(0, 0, 0, 0.72);
+      backdrop-filter: saturate(180%) blur(20px);
+      -webkit-backdrop-filter: saturate(180%) blur(20px);
+      border-bottom: 1px solid var(--separator);
+    }
+
+    .am-topbar-inner {
+      max-width: 72rem;
+      margin: 0 auto;
+      padding: 0.65rem 1rem 0.75rem;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.75rem 1rem;
+    }
+
+    .am-brand {
+      font-weight: 700;
+      font-size: 1.15rem;
+      letter-spacing: -0.02em;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      flex-shrink: 0;
+    }
+
+    .am-brand-icon {
+      color: var(--music-pink);
+      font-size: 1.25rem;
+    }
+
+    .am-search-field {
+      flex: 1;
+      min-width: 200px;
+      max-width: 36rem;
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .am-search-field svg {
+      position: absolute;
+      left: 0.75rem;
+      width: 1rem;
+      height: 1rem;
+      opacity: 0.45;
+      pointer-events: none;
+    }
+
+    .am-search-field input[type="search"] {
+      width: 100%;
+      padding: 0.55rem 0.85rem 0.55rem 2.25rem;
+      border: none;
+      border-radius: 999px;
+      background: var(--elevated2);
+      color: var(--text);
+      font-size: 0.9rem;
+      outline: none;
+      transition: background 0.2s, box-shadow 0.2s;
+    }
+
+    .am-search-field input[type="search"]::placeholder {
+      color: var(--label);
+    }
+
+    .am-search-field input[type="search"]:focus {
+      background: #3a3a3c;
+      box-shadow: 0 0 0 2px rgba(250, 36, 60, 0.35);
+    }
+
+    .wrap {
+      position: relative;
+      z-index: 1;
+      max-width: 72rem;
+      margin: 0 auto;
+      padding: 1rem 1rem 2.5rem;
+      min-height: calc(100vh - 52px);
+    }
+
+    .site-head {
+      margin-bottom: 1.25rem;
+    }
+
+    .site-head h1 {
+      margin: 0;
+      font-size: clamp(1.75rem, 4vw, 2.25rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+    }
+
+    .tagline {
+      color: var(--label);
+      font-size: 0.95rem;
+      margin: 0.35rem 0 0;
+      line-height: 1.4;
+      max-width: 32rem;
+    }
+
+    .layout-grid {
+      display: grid;
+      gap: 1.25rem;
+      align-items: start;
+    }
+
+    @media (min-width: 880px) {
+      .layout-grid {
+        grid-template-columns: 13rem minmax(0, 1fr);
+        gap: 1.5rem 2rem;
+      }
+      .rail {
+        position: sticky;
+        top: 4.5rem;
+      }
+    }
+
+    .stage {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      min-width: 0;
+    }
+
+    .panel {
+      background: var(--elevated);
+      border-radius: 12px;
+      padding: 1rem 1.1rem;
+      border: 1px solid var(--separator);
+    }
+
+    .panel-head {
+      margin-bottom: 0.75rem;
+    }
+
+    .panel-head h2 {
+      margin: 0;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--label);
+    }
+
+    .moods {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+
+    .mood-btn {
+      appearance: none;
+      border: none;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text);
+      padding: 0.5rem 0.65rem;
+      font: inherit;
+      font-size: 0.95rem;
+      font-weight: 500;
+      text-align: left;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .mood-btn:hover {
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .mood-btn.active {
+      background: rgba(250, 36, 60, 0.2);
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .mood-btn[data-mood="chill"].active { box-shadow: inset 3px 0 0 var(--accent-chill); }
+    .mood-btn[data-mood="happy"].active { box-shadow: inset 3px 0 0 var(--accent-happy); }
+    .mood-btn[data-mood="angry"].active { box-shadow: inset 3px 0 0 var(--accent-angry); }
+    .mood-btn[data-mood="melancholy"].active { box-shadow: inset 3px 0 0 var(--accent-melancholy); }
+
+    .hint {
+      font-size: 0.85rem;
+      color: var(--label);
+      margin: 0;
+      line-height: 1.45;
+    }
+
+    .viz-wrap {
+      position: relative;
+      overflow: hidden;
+      border-radius: 12px;
+      aspect-ratio: 16 / 9;
+      background: #000;
+      border: 1px solid var(--separator);
+    }
+
+    #viz {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .viz-hud {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: 0.75rem 1rem;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 1rem;
+      pointer-events: none;
+      background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
+    }
+
+    .hud-left {
+      display: flex;
+      flex-direction: column;
+      gap: 0.1rem;
+    }
+
+    .hud-mood {
+      font-weight: 600;
+      font-size: 1rem;
+      letter-spacing: -0.02em;
+    }
+
+    .hud-sub {
+      font-size: 0.62rem;
+      color: rgba(255, 255, 255, 0.45);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .level-meter {
+      display: flex;
+      gap: 2px;
+      align-items: flex-end;
+      height: 28px;
+    }
+
+    .level-bar {
+      width: 3px;
+      border-radius: 1px;
+      background: rgba(255, 255, 255, 0.12);
+      min-height: 3px;
+      transition: height 0.06s ease-out, background 0.2s;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+    }
+
+    .btn-primary {
+      appearance: none;
+      border: none;
+      border-radius: 999px;
+      background: var(--music-pink);
+      color: #fff;
+      padding: 0.5rem 1.35rem;
+      font: inherit;
+      font-weight: 600;
+      font-size: 0.88rem;
+      cursor: pointer;
+      transition: filter 0.15s, transform 0.1s;
+    }
+
+    .btn-primary:hover {
+      filter: brightness(1.08);
+    }
+
+    .btn-primary:active {
+      transform: scale(0.98);
+    }
+
+    .btn-secondary {
+      appearance: none;
+      border: 1px solid var(--separator);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text);
+      padding: 0.45rem 1rem;
+      font: inherit;
+      font-weight: 500;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.14);
+    }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--label);
+      letter-spacing: 0.04em;
+    }
+
+    input[type="range"] {
+      width: 100px;
+      accent-color: var(--music-pink);
+      cursor: pointer;
+    }
+
+    .file-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+      font-size: 0.82rem;
+      color: var(--label);
+    }
+
+    input[type="file"] {
+      font: inherit;
+      font-size: 0.78rem;
+      max-width: 100%;
+    }
+
+    .song-panel .song-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+      margin-top: 0.65rem;
+    }
+
+    .btn-song {
+      appearance: none;
+      border: none;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text);
+      padding: 0.45rem 1rem;
+      font: inherit;
+      font-weight: 600;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .btn-song:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.16);
+    }
+
+    .btn-song:disabled {
+      opacity: 0.45;
+      cursor: wait;
+    }
+
+    .song-card {
+      display: grid;
+      grid-template-columns: 88px 1fr;
+      gap: 0.85rem;
+      align-items: center;
+      margin-top: 0.85rem;
+      padding: 0.9rem;
+      border-radius: 10px;
+      background: var(--elevated2);
+      border: 1px solid var(--separator);
+    }
+
+    .song-card.hidden { display: none; }
+
+    .song-card img {
+      width: 88px;
+      height: 88px;
+      border-radius: 12px;
+      object-fit: cover;
+      background: #0c0c0c;
+    }
+
+    .song-info {
+      min-width: 0;
+    }
+
+    .song-title {
+      font-weight: 600;
+      font-size: 1rem;
+      line-height: 1.2;
+      margin-bottom: 0.15rem;
+    }
+
+    .song-artist {
+      color: var(--label);
+      font-size: 0.9rem;
+    }
+
+    .song-meta {
+      font-size: 0.65rem;
+      font-weight: 600;
+      color: var(--label);
+      margin-top: 0.45rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .song-card-actions {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-top: 0.15rem;
+    }
+
+    .song-card-actions a.btn-secondary {
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .song-error {
+      margin-top: 0.65rem;
+      font-size: 0.85rem;
+      color: #ff9f8a;
+    }
+
+    .song-error.hidden { display: none; }
+
+    .song-options {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      margin-top: 0.5rem;
+      font-size: 0.82rem;
+      color: var(--label);
+    }
+
+    .song-options input { accent-color: var(--music-pink); cursor: pointer; }
+
+    .am-results-section {
+      margin-top: 0.25rem;
+    }
+
+    .am-section-title {
+      margin: 0 0 0.5rem;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--label);
+    }
+
+    .am-results {
+      max-height: min(42vh, 320px);
+      overflow-y: auto;
+      border-radius: 10px;
+      background: var(--elevated2);
+      border: 1px solid var(--separator);
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .am-results.hidden {
+      display: none;
+    }
+
+    .am-results-loading,
+    .am-results-empty {
+      padding: 1rem 1.1rem;
+      color: var(--label);
+      font-size: 0.9rem;
+    }
+
+    .am-result-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      width: 100%;
+      padding: 0.55rem 0.85rem;
+      border: none;
+      border-bottom: 1px solid var(--separator);
+      background: transparent;
+      color: var(--text);
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+      transition: background 0.12s;
+    }
+
+    .am-result-row:last-child {
+      border-bottom: none;
+    }
+
+    .am-result-row:hover {
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .am-result-row img {
+      width: 48px;
+      height: 48px;
+      border-radius: 14px;
+      object-fit: cover;
+      background: #0c0c0c;
+      flex-shrink: 0;
+    }
+
+    .am-result-text {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+
+    .am-result-title {
+      font-weight: 600;
+      font-size: 0.95rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .am-result-sub {
+      font-size: 0.82rem;
+      color: var(--label);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    footer {
+      margin-top: 2rem;
+      font-size: 0.72rem;
+      color: var(--label);
+      letter-spacing: 0.02em;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <!-- Fixed layer: mood-colored gradients (updated in JS when mood changes) -->
+  <div class="ambient" id="ambient" aria-hidden="true"></div>
+  <header class="am-topbar">
+    <div class="am-topbar-inner">
+      <div class="am-brand"><span class="am-brand-icon" aria-hidden="true">♪</span> Resonance</div>
+      <div class="am-search-field" role="search">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="8" />
+          <path d="m21 21-4.35-4.35" />
+        </svg>
+        <input
+          type="search"
+          id="catalog-search"
+          placeholder="Search artists, songs, albums, and more…"
+          autocomplete="off"
+          enterkeyhint="search"
+        />
+      </div>
+    </div>
+  </header>
+  <div class="wrap">
+    <header class="site-head">
+      <h1>Listen &amp; feel</h1>
+      <p class="tagline">Generate sound, watch the canvas react, then search the catalog or pick by mood.</p>
+    </header>
+
+    <main class="layout-grid">
+      <aside class="rail">
+        <section class="panel mood-panel">
+          <div class="panel-head">
+            <h2>Pick</h2>
+          </div>
+          <div class="moods">
+            <button type="button" class="mood-btn active" data-mood="chill">Chill</button>
+            <button type="button" class="mood-btn" data-mood="happy">Happy</button>
+            <button type="button" class="mood-btn" data-mood="angry">Angry</button>
+            <button type="button" class="mood-btn" data-mood="melancholy">Melancholy</button>
+          </div>
+          <p class="hint" style="margin-top: 1rem">
+            Changes EQ, rhythm, and the picture. Press <strong>Play</strong> first (browser rule).
+          </p>
+        </section>
+      </aside>
+
+      <div class="stage">
+        <div class="viz-wrap">
+          <canvas id="viz" width="1280" height="720" aria-label="Audio-reactive visualization"></canvas>
+          <div class="viz-hud">
+            <div class="hud-left">
+              <span class="hud-mood" id="hud-mood">Chill</span>
+              <span class="hud-sub" id="hud-bpm">72 BPM · ambient arp</span>
+            </div>
+            <div class="level-meter" id="level-meter" aria-hidden="true"></div>
+          </div>
+        </div>
+
+        <section class="am-results-section hidden" id="search-results-section" aria-live="polite">
+          <h3 class="am-section-title">Search results</h3>
+          <div id="search-results" class="am-results"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>In / out</h2>
+          </div>
+          <div class="controls">
+            <button type="button" class="btn-primary" id="toggle-audio">Play</button>
+            <button type="button" class="btn-secondary" id="toggle-mic">Mic</button>
+            <div class="slider-row">
+              <label for="vol">Vol</label>
+              <input type="range" id="vol" min="0" max="100" value="55" />
+            </div>
+            <div class="slider-row">
+              <label for="viz-int">Motion</label>
+              <input type="range" id="viz-int" min="30" max="130" value="100" />
+            </div>
+          </div>
+          <p class="hint" style="margin-top: 0.85rem">
+            Mic or file: same analyzer, same canvas.
+          </p>
+          <div class="file-row" style="margin-top: 0.75rem">
+            <span>File</span>
+            <input type="file" id="audio-file" accept="audio/*" />
+          </div>
+        </section>
+
+        <section class="panel song-panel">
+          <div class="panel-head">
+            <h2>Catalog</h2>
+          </div>
+          <p class="hint">
+            Search the bar above, or use <strong>Find a track</strong> by mood. Previews are short clips; use Open or YouTube when there’s no preview.
+          </p>
+          <div class="song-actions">
+            <button type="button" class="btn-song" id="fetch-song">Find a track</button>
+            <button type="button" class="btn-secondary" id="fetch-song-again" disabled>Shuffle</button>
+          </div>
+          <label class="song-options">
+            <input type="checkbox" id="auto-song" checked />
+            <span>Auto when mood changes</span>
+          </label>
+          <div class="song-card hidden" id="song-card" aria-live="polite">
+            <img id="song-cover" width="88" height="88" alt="Album art" />
+            <div class="song-info">
+              <div class="song-title" id="song-title">—</div>
+              <div class="song-artist" id="song-artist">—</div>
+              <div class="song-meta" id="song-meta"></div>
+            </div>
+            <div class="song-card-actions">
+              <button type="button" class="btn-secondary" id="song-preview">Preview</button>
+              <a class="btn-secondary" id="song-open" href="#" target="_blank" rel="noopener noreferrer">Open</a>
+              <a class="btn-secondary" id="song-search-yt" href="#" target="_blank" rel="noopener noreferrer">YouTube</a>
+            </div>
+          </div>
+          <p class="song-error hidden" id="song-error"></p>
+        </section>
+      </div>
+    </main>
+
+    <footer>Web Audio · canvas · no framework</footer>
+  </div>
+
+  <!--
+    =============================================================================
+    APPLICATION LOGIC (IIFE — no globals)
+    - Web Audio: synth → moodFilter → masterGain → compressor → analyser → speakers
+    - Mic / file: connect directly to masterGain
+    - Canvas: requestAnimationFrame loop reads analyser + draws
+    =============================================================================
+  -->
+  <script>
+    (function () {
+      /* Display names + HUD subtitle (BPM / style) per mood */
+      const moodLabels = { chill: "Chill", happy: "Happy", angry: "Angry", melancholy: "Melancholy" };
+      const moodHints = {
+        chill: "72 BPM · ambient arp",
+        happy: "118 BPM · stacked chords",
+        angry: "140 BPM · noise + saw",
+        melancholy: "80 BPM · minor pad",
+      };
+
+      /*
+        Visual + ambient background per mood:
+        hue/hue2/sat — canvas HSL; speed/pulse — animation; bg/bg2 — lerp targets;
+        ambient — CSS gradient string for #ambient
+      */
+      const moods = {
+        chill: {
+          hue: 210,
+          hue2: 255,
+          sat: 58,
+          speed: 0.32,
+          pulse: 0.1,
+          bg: [12, 14, 24],
+          bg2: [24, 26, 36],
+          accent: [110, 190, 255],
+          ambient: "radial-gradient(ellipse 90% 55% at 10% 0%, rgba(120, 150, 175, 0.22), transparent 52%), radial-gradient(ellipse 70% 45% at 95% 15%, rgba(130, 120, 160, 0.1), transparent 48%), radial-gradient(ellipse 60% 40% at 50% 100%, rgba(90, 100, 110, 0.12), transparent 52%), #000000",
+        },
+        happy: {
+          hue: 32,
+          hue2: 12,
+          sat: 90,
+          speed: 0.88,
+          pulse: 0.38,
+          bg: [32, 20, 8],
+          bg2: [58, 36, 14],
+          accent: [255, 200, 90],
+          ambient: "radial-gradient(ellipse 80% 50% at 8% 5%, rgba(220, 175, 90, 0.18), transparent 50%), radial-gradient(ellipse 65% 42% at 92% 12%, rgba(200, 130, 100, 0.1), transparent 48%), radial-gradient(ellipse 55% 38% at 50% 100%, rgba(180, 140, 80, 0.1), transparent 50%), #000000",
+        },
+        angry: {
+          hue: 0,
+          hue2: 320,
+          sat: 85,
+          speed: 1.45,
+          pulse: 0.58,
+          bg: [28, 6, 10],
+          bg2: [48, 10, 14],
+          accent: [255, 55, 70],
+          ambient: "radial-gradient(ellipse 82% 52% at 18% 0%, rgba(190, 80, 70, 0.16), transparent 50%), radial-gradient(ellipse 58% 42% at 90% 22%, rgba(170, 90, 75, 0.1), transparent 46%), radial-gradient(ellipse 48% 35% at 50% 100%, rgba(120, 70, 65, 0.08), transparent 50%), #000000",
+        },
+        melancholy: {
+          hue: 265,
+          hue2: 220,
+          sat: 48,
+          speed: 0.42,
+          pulse: 0.18,
+          bg: [14, 10, 28],
+          bg2: [28, 22, 48],
+          accent: [160, 130, 230],
+          ambient: "radial-gradient(ellipse 85% 52% at 25% 0%, rgba(130, 110, 165, 0.18), transparent 50%), radial-gradient(ellipse 60% 44% at 85% 18%, rgba(100, 85, 130, 0.1), transparent 48%), radial-gradient(ellipse 58% 40% at 50% 100%, rgba(80, 75, 95, 0.1), transparent 52%), #000000",
+        },
+      };
+
+      /* App state */
+      let currentMood = "chill";
+      let audioRunning = false;
+      let micMode = false;
+      let vizIntensity = 1;
+      let lerpBg = [8, 8, 10];
+      let lerpBg2 = [14, 14, 18];
+      let lerpHue = 210; /* smoothed toward current mood’s hue in draw() */
+
+      const canvas = document.getElementById("viz");
+      const ctx = canvas.getContext("2d");
+      const ambientEl = document.getElementById("ambient");
+      const hudMood = document.getElementById("hud-mood");
+      const hudBpm = document.getElementById("hud-bpm");
+      const levelMeter = document.getElementById("level-meter");
+      /* Build 16 vertical bars for the on-canvas peak meter */
+      for (let i = 0; i < 16; i++) {
+        const b = document.createElement("div");
+        b.className = "level-bar";
+        levelMeter.appendChild(b);
+      }
+      const levelBars = levelMeter.querySelectorAll(".level-bar");
+
+      /* Web Audio graph (created lazily in ensureAudio) */
+      let audioCtx = null;
+      let masterGain = null;
+      let synthGain = null;
+      let moodFilter = null;
+      let compressor = null;
+      let analyser = null;
+      let dataArray = null;
+      let waveArray = null;
+      let moodNodes = [];
+      let micStream = null;
+      let micSourceNode = null;
+      let scheduledUntil = 0;
+      let step = 0;
+      let fileAudio = null; /* <audio> for user file; routed through Web Audio */
+      let fileMediaNode = null;
+
+      const toggleBtn = document.getElementById("toggle-audio");
+      const micBtn = document.getElementById("toggle-mic");
+      const fileInput = document.getElementById("audio-file");
+      const volSlider = document.getElementById("vol");
+      const vizSlider = document.getElementById("viz-int");
+
+      vizSlider.addEventListener("input", () => {
+        vizIntensity = Number(vizSlider.value) / 100;
+      });
+
+      /* Deezer/iTunes search strings per mood */
+      const moodSongQueries = {
+        chill: "chill relaxing lofi ambient",
+        happy: "happy upbeat pop dance",
+        angry: "intense aggressive metal rock energy",
+        melancholy: "melancholic sad indie acoustic",
+      };
+
+      /* Used when APIs fail (offline / CORS): title + artist only */
+      const fallbackCurated = {
+        chill: [
+          { title: "Weightless", artist: "Marconi Union" },
+          { title: "Breathe Me", artist: "Sia" },
+          { title: "Holocene", artist: "Bon Iver" },
+        ],
+        happy: [
+          { title: "Walking on Sunshine", artist: "Katrina and the Waves" },
+          { title: "Happy", artist: "Pharrell Williams" },
+          { title: "Good as Hell", artist: "Lizzo" },
+        ],
+        angry: [
+          { title: "Break Stuff", artist: "Limp Bizkit" },
+          { title: "Killing in the Name", artist: "Rage Against the Machine" },
+          { title: "Bodies", artist: "Drowning Pool" },
+        ],
+        melancholy: [
+          { title: "Motion Picture Soundtrack", artist: "Radiohead" },
+          { title: "Hurt", artist: "Johnny Cash" },
+          { title: "The Night We Met", artist: "Lord Huron" },
+        ],
+      };
+
+      const fetchSongBtn = document.getElementById("fetch-song");
+      const fetchAgainBtn = document.getElementById("fetch-song-again");
+      const songCard = document.getElementById("song-card");
+      const songCover = document.getElementById("song-cover");
+      const songTitleEl = document.getElementById("song-title");
+      const songArtistEl = document.getElementById("song-artist");
+      const songMetaEl = document.getElementById("song-meta");
+      const songOpen = document.getElementById("song-open");
+      const songSearchYt = document.getElementById("song-search-yt");
+      const songPreviewBtn = document.getElementById("song-preview");
+      const songErrorEl = document.getElementById("song-error");
+      const autoSongCheckbox = document.getElementById("auto-song");
+      const catalogSearchInput = document.getElementById("catalog-search");
+      const searchResultsEl = document.getElementById("search-results");
+      const searchResultsSection = document.getElementById("search-results-section");
+
+      let songPreviewAudio = null;
+      let lastSynthWasRunning = false;
+      let songFetchDebounce = null;
+      let catalogSearchDebounce = null;
+      let lastTrackPool = []; /* normalized tracks for “Pick another” */
+
+      function escapeHtml(str) {
+        return String(str)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function pickRandom(arr) {
+        return arr[Math.floor(Math.random() * arr.length)];
+      }
+
+      function ytSearchUrl(title, artist) {
+        const q = encodeURIComponent(`${artist} ${title} official audio`);
+        return `https://www.youtube.com/results?search_query=${q}`;
+      }
+
+      function showSongError(msg) {
+        songErrorEl.textContent = msg;
+        songErrorEl.classList.remove("hidden");
+      }
+
+      function clearSongError() {
+        songErrorEl.classList.add("hidden");
+        songErrorEl.textContent = "";
+      }
+
+      /* Tear down HTML5 preview; resume procedural synth if it was playing */
+      function stopSongPreview() {
+        if (songPreviewAudio) {
+          songPreviewAudio.pause();
+          songPreviewAudio.src = "";
+          songPreviewAudio = null;
+        }
+        songPreviewBtn.textContent = "Preview";
+        if (lastSynthWasRunning && audioRunning && !micMode && !fileAudio) {
+          startMoodSynth();
+          lastSynthWasRunning = false;
+        }
+      }
+
+      /* Populate song card DOM; hide “Open track” when no store URL */
+      function displayTrack(track) {
+        if (track.artwork) {
+          songCover.src = track.artwork;
+          songCover.style.opacity = "1";
+        } else {
+          songCover.src =
+            "data:image/svg+xml," +
+            encodeURIComponent(
+              '<svg xmlns="http://www.w3.org/2000/svg" width="88" height="88"><rect fill="#1a1a24" width="88" height="88" rx="12"/><text x="44" y="52" text-anchor="middle" fill="#888" font-size="11" font-family="system-ui">♪</text></svg>'
+            );
+          songCover.style.opacity = "0.9";
+        }
+        songCover.alt = track.album ? `${track.album} artwork` : "Album art";
+        songTitleEl.textContent = track.title;
+        songArtistEl.textContent = track.artist;
+        songMetaEl.textContent = track.source + (track.year ? " · " + track.year : "");
+        if (track.openUrl) {
+          songOpen.href = track.openUrl;
+          songOpen.style.display = "inline-flex";
+        } else {
+          songOpen.href = "#";
+          songOpen.style.display = "none";
+        }
+        songSearchYt.href = ytSearchUrl(track.title, track.artist);
+        songCard.classList.remove("hidden");
+        fetchAgainBtn.disabled = lastTrackPool.length < 2;
+      }
+
+      function buildItunesSearchUrl(query, limit) {
+        const u = new URL("https://itunes.apple.com/search");
+        u.searchParams.set("term", query);
+        u.searchParams.set("media", "music");
+        u.searchParams.set("entity", "song");
+        u.searchParams.set("limit", String(limit));
+        u.searchParams.set("country", "us");
+        return u.toString();
+      }
+
+      function buildDeezerSearchUrl(query, limit) {
+        return `https://api.deezer.com/search?q=${encodeURIComponent(query)}&limit=${limit}`;
+      }
+
+      function parseJsonResponseText(text) {
+        const t = text.trim();
+        if (t.startsWith("<") || t.startsWith("<!")) throw new Error("not json");
+        return JSON.parse(t);
+      }
+
+      /*
+        Direct fetch first, then public CORS proxies. iTunes/Deezer often block
+        browser fetch; Openverse (below) is the last-resort API that allows fetch.
+      */
+      async function fetchJsonFlexible(targetUrl) {
+        const attempts = [
+          async () => {
+            const res = await fetch(targetUrl);
+            if (!res.ok) throw new Error("http");
+            return parseJsonResponseText(await res.text());
+          },
+          async () => {
+            const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(targetUrl)}`);
+            if (!res.ok) throw new Error("http");
+            return parseJsonResponseText(await res.text());
+          },
+          async () => {
+            const res = await fetch(
+              `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`
+            );
+            if (!res.ok) throw new Error("http");
+            const outer = parseJsonResponseText(await res.text());
+            if (!outer.contents) throw new Error("empty");
+            return parseJsonResponseText(outer.contents);
+          },
+        ];
+        let last;
+        for (const fn of attempts) {
+          try {
+            return await fn();
+          } catch (e) {
+            last = e;
+          }
+        }
+        throw last || new Error("fetch failed");
+      }
+
+      async function fetchItunes(query) {
+        return fetchJsonFlexible(buildItunesSearchUrl(query, 25));
+      }
+
+      async function fetchDeezer(query) {
+        return fetchJsonFlexible(buildDeezerSearchUrl(query, 25));
+      }
+
+      /* CC music catalog — CORS-friendly; used when Apple/Deezer fail in-browser */
+      async function fetchOpenverseSearch(query, limit) {
+        const url = `https://api.openverse.org/v1/audio/?q=${encodeURIComponent(query)}&page_size=${limit}&page=1`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("openverse");
+        return res.json();
+      }
+
+      /*
+        iTunes Search via JSONP — backup when fetch + proxies fail.
+      */
+      function fetchItunesJsonp(query, limit) {
+        return new Promise((resolve, reject) => {
+          const cb = "itunesJsonp" + Date.now().toString(36) + Math.random().toString(36).slice(2);
+          let s = null;
+          const timeout = window.setTimeout(() => {
+            cleanup();
+            reject(new Error("timeout"));
+          }, 15000);
+          function cleanup() {
+            window.clearTimeout(timeout);
+            try {
+              delete window[cb];
+            } catch (x) {
+              /* ignore */
+            }
+            if (s && s.parentNode) s.parentNode.removeChild(s);
+          }
+          window[cb] = function (data) {
+            cleanup();
+            resolve(data);
+          };
+          s = document.createElement("script");
+          const u = new URL("https://itunes.apple.com/search");
+          u.searchParams.set("term", query);
+          u.searchParams.set("media", "music");
+          u.searchParams.set("entity", "song");
+          u.searchParams.set("limit", String(limit));
+          u.searchParams.set("callback", cb);
+          s.src = u.toString();
+          s.async = true;
+          s.onerror = function () {
+            cleanup();
+            reject(new Error("jsonp"));
+          };
+          document.head.appendChild(s);
+        });
+      }
+
+      /* Deezer search result → unified shape for the UI */
+      function mapDeezerTrack(t) {
+        return {
+          title: t.title,
+          artist: t.artist && t.artist.name ? t.artist.name : "Unknown",
+          artistSort: t.artist && t.artist.name ? t.artist.name : "",
+          album: t.album && t.album.title ? t.album.title : "",
+          artwork: t.album && t.album.cover_medium ? t.album.cover_medium : "",
+          previewUrl: t.preview || "",
+          openUrl: t.link || "",
+          source: "Deezer",
+          year: "",
+        };
+      }
+
+      /* Apple Music / iTunes search result → unified shape */
+      function mapItunesTrack(t) {
+        if (!t || typeof t.trackName !== "string") return null;
+        return {
+          title: t.trackName,
+          artist: t.artistName || "Unknown",
+          artistSort: t.artistName || "",
+          album: t.collectionName,
+          artwork: t.artworkUrl100 ? t.artworkUrl100.replace("100x100", "300x300") : "",
+          previewUrl: t.previewUrl || "",
+          openUrl: t.trackViewUrl || "",
+          source: "Apple Music / iTunes",
+          year: t.releaseDate ? String(new Date(t.releaseDate).getFullYear()) : "",
+        };
+      }
+
+      /* Openverse (Creative Commons audio index) */
+      function mapOpenverseTrack(r) {
+        return {
+          title: r.title || "Untitled",
+          artist: (r.creator && String(r.creator)) || "Unknown",
+          artistSort: r.creator || "",
+          album: r.audio_set && r.audio_set.title ? r.audio_set.title : "",
+          artwork: r.thumbnail || "",
+          previewUrl: r.url || "",
+          openUrl: r.foreign_landing_url || r.detail_url || "",
+          source: "Openverse (" + (r.provider || "CC") + ")",
+          year: "",
+        };
+      }
+
+      /* Curated offline list (no preview URL; YouTube link only) */
+      function mapFallbackTrack(c) {
+        const q = `${c.artist} ${c.title}`;
+        return {
+          title: c.title,
+          artist: c.artist,
+          artistSort: c.artist,
+          album: "",
+          artwork: "",
+          previewUrl: "",
+          openUrl: "",
+          source: "Suggestion (offline)",
+          year: "",
+          ytOnly: true,
+        };
+      }
+
+      function setSongActionButtons(isLoading) {
+        fetchSongBtn.disabled = isLoading;
+        fetchAgainBtn.disabled = isLoading || lastTrackPool.length < 2;
+      }
+
+      function toItunesTracks(data, limit) {
+        if (!data || !data.results || !data.results.length) return [];
+        return data.results.map(mapItunesTrack).filter(Boolean).slice(0, limit);
+      }
+
+      function toDeezerTracks(data, limit) {
+        if (!data || data.error || !data.data || !data.data.length) return [];
+        return data.data.slice(0, limit).map(mapDeezerTrack);
+      }
+
+      function toOpenverseTracks(data, limit) {
+        if (!data || !data.results || !data.results.length) return [];
+        return data.results.slice(0, limit).map(mapOpenverseTrack);
+      }
+
+      async function fetchTrackPoolWithFallback(query, limit) {
+        const attempts = [
+          async () => toItunesTracks(await fetchJsonFlexible(buildItunesSearchUrl(query, limit)), limit),
+          async () => toItunesTracks(await fetchItunesJsonp(query, limit), limit),
+          async () => toDeezerTracks(await fetchJsonFlexible(buildDeezerSearchUrl(query, limit)), limit),
+          async () => toOpenverseTracks(await fetchOpenverseSearch(query, limit), limit),
+        ];
+
+        for (const attempt of attempts) {
+          try {
+            const tracks = await attempt();
+            if (tracks.length) return tracks;
+          } catch (e) {
+            /* try next source */
+          }
+        }
+        return [];
+      }
+
+      /* Top-bar catalog search with provider fallback chain */
+      async function runCatalogSearch(raw) {
+        const q = raw.trim();
+        if (q.length < 2) {
+          searchResultsSection.classList.add("hidden");
+          searchResultsEl.innerHTML = "";
+          return;
+        }
+        searchResultsSection.classList.remove("hidden");
+        searchResultsEl.innerHTML = '<div class="am-results-loading">Searching…</div>';
+        const pool = await fetchTrackPoolWithFallback(q, 20);
+        if (!pool.length) {
+          searchResultsEl.innerHTML =
+            '<div class="am-results-empty">No results — try different words or check your network.</div>';
+          return;
+        }
+        renderSearchResults(pool);
+      }
+
+      function renderSearchResults(tracks) {
+        lastTrackPool = tracks;
+        fetchAgainBtn.disabled = lastTrackPool.length < 2;
+        const rows = tracks
+          .map((t, i) => {
+            const art = t.artwork || "";
+            const safeTitle = escapeHtml(t.title);
+            const safeArtist = escapeHtml(t.artist);
+            const placeholderSvg = encodeURIComponent(
+              '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect fill="#1c1c1e" width="48" height="48" rx="14"/></svg>'
+            );
+            const img = art
+              ? `<img src="${escapeHtml(art)}" alt="" width="48" height="48" loading="lazy" />`
+              : `<img src="data:image/svg+xml,${placeholderSvg}" alt="" width="48" height="48" />`;
+            return `<button type="button" class="am-result-row" data-index="${i}">
+      ${img}
+      <div class="am-result-text">
+        <span class="am-result-title">${safeTitle}</span>
+        <span class="am-result-sub">${safeArtist}</span>
+      </div>
+    </button>`;
+          })
+          .join("");
+        searchResultsEl.innerHTML = rows;
+        searchResultsEl.querySelectorAll(".am-result-row").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const idx = Number(btn.dataset.index);
+            const track = lastTrackPool[idx];
+            if (!track) return;
+            clearSongError();
+            stopSongPreview();
+            displayTrack(track);
+            document.getElementById("song-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
+          });
+        });
+      }
+
+      /* Try live catalog providers, then static fallback */
+      async function loadSongForMood() {
+        clearSongError();
+        setSongActionButtons(true);
+        const q = moodSongQueries[currentMood];
+        lastTrackPool = await fetchTrackPoolWithFallback(q, 25);
+        if (lastTrackPool.length) {
+          displayTrack(pickRandom(lastTrackPool));
+          setSongActionButtons(false);
+          return;
+        }
+        lastTrackPool = fallbackCurated[currentMood].map(mapFallbackTrack);
+        displayTrack(pickRandom(lastTrackPool));
+        showSongError("Live catalog unreachable — showing a curated pick. You can still open YouTube.");
+        setSongActionButtons(false);
+      }
+
+      /* Random re-pick from same API result set (avoid duplicate title if possible) */
+      function pickAnotherFromPool() {
+        if (lastTrackPool.length < 2) return;
+        stopSongPreview();
+        let next;
+        let guard = 0;
+        do {
+          next = pickRandom(lastTrackPool);
+          guard++;
+        } while (guard < 12 && lastTrackPool.length > 1 && next.title === songTitleEl.textContent);
+        displayTrack(next);
+      }
+
+      /* Debounced auto-fetch after mood button changes */
+      function scheduleSongFetch() {
+        if (!autoSongCheckbox.checked) return;
+        clearTimeout(songFetchDebounce);
+        songFetchDebounce = setTimeout(() => {
+          loadSongForMood();
+        }, 450);
+      }
+
+      fetchSongBtn.addEventListener("click", () => {
+        stopSongPreview();
+        loadSongForMood();
+      });
+
+      fetchAgainBtn.addEventListener("click", () => {
+        pickAnotherFromPool();
+      });
+
+      catalogSearchInput.addEventListener("input", () => {
+        clearTimeout(catalogSearchDebounce);
+        const v = catalogSearchInput.value;
+        catalogSearchDebounce = setTimeout(() => {
+          runCatalogSearch(v);
+        }, 380);
+      });
+
+      catalogSearchInput.addEventListener("search", () => {
+        if (catalogSearchInput.value.trim() === "") {
+          searchResultsSection.classList.add("hidden");
+          searchResultsEl.innerHTML = "";
+        }
+      });
+
+      /* Play MP3 preview or open YouTube if no preview URL */
+      songPreviewBtn.addEventListener("click", () => {
+        if (songTitleEl.textContent === "—" || !lastTrackPool.length) return;
+        const track =
+          lastTrackPool.find(
+            (t) => t.title === songTitleEl.textContent && t.artist === songArtistEl.textContent
+          ) || lastTrackPool.find((t) => t.title === songTitleEl.textContent) || lastTrackPool[0];
+        if (!track || !track.previewUrl) {
+          window.open(songSearchYt.href, "_blank", "noopener,noreferrer");
+          return;
+        }
+        if (songPreviewAudio && !songPreviewAudio.paused) {
+          stopSongPreview();
+          return;
+        }
+        lastSynthWasRunning = audioRunning && !micMode && !fileAudio;
+        if (lastSynthWasRunning) stopMoodSynth();
+        songPreviewAudio = new Audio(track.previewUrl);
+        songPreviewAudio.crossOrigin = "anonymous";
+        songPreviewBtn.textContent = "Stop";
+        songPreviewAudio.onended = () => stopSongPreview();
+        songPreviewAudio.onerror = () => {
+          stopSongPreview();
+          showSongError("Preview failed — try Open track or YouTube.");
+        };
+        songPreviewAudio.play().catch(() => {
+          stopSongPreview();
+          showSongError("Preview blocked — try Open track or YouTube.");
+        });
+      });
+
+      /* Mood-specific biquad: only affects procedural synth (synthGain → moodFilter → masterGain) */
+      function applyMoodFilter() {
+        if (!moodFilter || !audioCtx) return;
+        const now = audioCtx.currentTime;
+        const m = currentMood;
+        moodFilter.gain.setTargetAtTime(0, now, 0.05);
+        if (m === "chill") {
+          moodFilter.type = "lowpass";
+          moodFilter.frequency.setTargetAtTime(2200, now, 0.05);
+          moodFilter.Q.value = 0.7;
+        } else if (m === "happy") {
+          moodFilter.type = "peaking";
+          moodFilter.frequency.setTargetAtTime(2800, now, 0.05);
+          moodFilter.gain.setTargetAtTime(4, now, 0.05);
+          moodFilter.Q.value = 0.5;
+        } else if (m === "angry") {
+          moodFilter.type = "highpass";
+          moodFilter.frequency.setTargetAtTime(180, now, 0.05);
+          moodFilter.Q.value = 0.8;
+        } else {
+          moodFilter.type = "lowpass";
+          moodFilter.frequency.setTargetAtTime(1400, now, 0.05);
+          moodFilter.Q.value = 1.2;
+        }
+      }
+
+      /* Lazily create AudioContext + full graph; volume slider wires once */
+      function ensureAudio() {
+        if (!audioCtx) {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          synthGain = audioCtx.createGain();
+          synthGain.gain.value = 0.92;
+          moodFilter = audioCtx.createBiquadFilter();
+          moodFilter.type = "lowpass";
+          moodFilter.frequency.value = 2200;
+          synthGain.connect(moodFilter);
+          masterGain = audioCtx.createGain();
+          masterGain.gain.value = 0;
+          moodFilter.connect(masterGain);
+          compressor = audioCtx.createDynamicsCompressor();
+          compressor.threshold.value = -18;
+          compressor.knee.value = 18;
+          compressor.ratio.value = 3.2;
+          compressor.attack.value = 0.006;
+          compressor.release.value = 0.22;
+          masterGain.connect(compressor);
+          analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 2048;
+          analyser.smoothingTimeConstant = 0.82;
+          dataArray = new Uint8Array(analyser.frequencyBinCount);
+          waveArray = new Uint8Array(analyser.fftSize);
+          compressor.connect(analyser);
+          analyser.connect(audioCtx.destination);
+          applyMoodFilter();
+          volSlider.addEventListener("input", () => {
+            const v = Number(volSlider.value) / 100;
+            if (audioRunning && masterGain) {
+              masterGain.gain.setTargetAtTime(v * 0.85, audioCtx.currentTime, 0.03);
+            }
+          });
+        }
+        return audioCtx;
+      }
+
+      /* MIDI note number → Hz (A4 = 69) */
+      function mtof(m) {
+        return 440 * Math.pow(2, (m - 69) / 12);
+      }
+
+      /* One-shot oscillator into synth bus; used by all mood loops */
+      function scheduleTone(time, freq, dur, type, gainVal) {
+        const ac = ensureAudio();
+        const osc = ac.createOscillator();
+        const g = ac.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, time);
+        g.gain.setValueAtTime(0, time);
+        g.gain.linearRampToValueAtTime(gainVal, time + 0.025);
+        g.gain.exponentialRampToValueAtTime(0.001, time + dur);
+        osc.connect(g);
+        g.connect(synthGain);
+        osc.start(time);
+        osc.stop(time + dur + 0.06);
+        moodNodes.push({ osc, g });
+      }
+
+      /* Short bandpassed noise (e.g. angry kicks) */
+      function scheduleNoiseBurst(time, dur, gainVal, centerHz) {
+        const ac = ensureAudio();
+        const bufferSize = ac.sampleRate * 0.06;
+        const buffer = ac.createBuffer(1, bufferSize, ac.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+        const noise = ac.createBufferSource();
+        noise.buffer = buffer;
+        const filter = ac.createBiquadFilter();
+        filter.type = "bandpass";
+        filter.frequency.value = centerHz || 200;
+        filter.Q.value = 1.2;
+        const g = ac.createGain();
+        g.gain.setValueAtTime(0, time);
+        g.gain.linearRampToValueAtTime(gainVal, time + 0.004);
+        g.gain.exponentialRampToValueAtTime(0.001, time + dur);
+        noise.connect(filter);
+        filter.connect(g);
+        g.connect(synthGain);
+        noise.start(time);
+        noise.stop(time + dur);
+        moodNodes.push({ noise, g });
+      }
+
+      /* ~72 BPM: pentatonic arp + occasional low pad */
+      function loopChill() {
+        const ac = ensureAudio();
+        const now = Math.max(ac.currentTime, scheduledUntil);
+        const bpm = 72;
+        const beat = 60 / bpm;
+        const base = Math.floor(now / beat) * beat;
+        const scale = [60, 64, 67, 72, 76, 79];
+        for (let i = 0; i < 8; i++) {
+          const t = base + i * (beat / 2);
+          if (t <= now) continue;
+          const note = scale[(step + i) % scale.length];
+          scheduleTone(t, mtof(note), 0.5, "sine", 0.085);
+        }
+        if (step % 8 === 0) {
+          scheduleTone(base + beat * 2, mtof(48), 2.2, "sine", 0.025);
+          scheduleTone(base + beat * 2, mtof(55), 2.2, "sine", 0.02);
+        }
+        step += 2;
+        scheduledUntil = base + beat * 4;
+        moodNodes._timer = setTimeout(loopChill, Math.max(50, (scheduledUntil - ac.currentTime) * 1000 - 80));
+      }
+
+      /* ~118 BPM: chord stabs + square accents */
+      function loopHappy() {
+        const ac = ensureAudio();
+        const now = Math.max(ac.currentTime, scheduledUntil);
+        const bpm = 118;
+        const beat = 60 / bpm;
+        const base = Math.floor(now / beat) * beat;
+        const chord = [64, 67, 71, 74];
+        for (let i = 0; i < 4; i++) {
+          const t = base + i * (beat / 2);
+          if (t <= now) continue;
+          chord.forEach((m, j) => {
+            scheduleTone(t, mtof(m + (i % 2) * 12), 0.11, "triangle", 0.055 - j * 0.009);
+          });
+          scheduleTone(t + beat * 0.125, mtof(88), 0.04, "square", 0.018);
+        }
+        if (step % 2 === 0) {
+          scheduleTone(base + beat * 0.25, mtof(76), 0.07, "square", 0.028);
+        }
+        step++;
+        scheduledUntil = base + beat * 2;
+        moodNodes._timer = setTimeout(loopHappy, Math.max(40, (scheduledUntil - ac.currentTime) * 1000 - 60));
+      }
+
+      /* ~140 BPM: noise + detuned saws */
+      function loopAngry() {
+        const ac = ensureAudio();
+        const now = Math.max(ac.currentTime, scheduledUntil);
+        const bpm = 140;
+        const beat = 60 / bpm;
+        const base = Math.floor(now / beat) * beat;
+        for (let i = 0; i < 4; i++) {
+          const t = base + i * (beat / 2);
+          if (t <= now) continue;
+          scheduleNoiseBurst(t + 0.001, 0.055, 0.14, 160 + i * 40);
+          scheduleTone(t, mtof(38 + (i % 3) * 4), 0.14, "sawtooth", 0.065);
+          scheduleTone(t + beat * 0.25, mtof(50), 0.09, "square", 0.048);
+        }
+        step++;
+        scheduledUntil = base + beat * 2;
+        moodNodes._timer = setTimeout(loopAngry, Math.max(35, (scheduledUntil - ac.currentTime) * 1000 - 50));
+      }
+
+      /* ~80 BPM: minor scale + pad triangles */
+      function loopMelancholy() {
+        const ac = ensureAudio();
+        const now = Math.max(ac.currentTime, scheduledUntil);
+        const bpm = 80;
+        const beat = 60 / bpm;
+        const base = Math.floor(now / beat) * beat;
+        const minor = [60, 63, 67, 70, 72, 75];
+        for (let i = 0; i < 6; i++) {
+          const t = base + i * (beat / 3);
+          if (t <= now) continue;
+          const note = minor[(step + i) % minor.length];
+          scheduleTone(t, mtof(note), 0.65, "sine", 0.06);
+        }
+        if (step % 6 === 0) {
+          scheduleTone(base, mtof(48), 3, "triangle", 0.035);
+          scheduleTone(base, mtof(55), 3, "triangle", 0.028);
+        }
+        step++;
+        scheduledUntil = base + beat * 2;
+        moodNodes._timer = setTimeout(loopMelancholy, Math.max(45, (scheduledUntil - ac.currentTime) * 1000 - 70));
+      }
+
+      /* Clear sequencer timer; active oscillators stop by scheduled stop time */
+      function stopMoodSynth() {
+        if (moodNodes._timer) {
+          clearTimeout(moodNodes._timer);
+          moodNodes._timer = null;
+        }
+        moodNodes = [];
+        scheduledUntil = 0;
+      }
+
+      /* (Re)start the loop matching currentMood */
+      function startMoodSynth() {
+        stopMoodSynth();
+        ensureAudio();
+        applyMoodFilter();
+        if (audioCtx.state === "suspended") audioCtx.resume();
+        if (currentMood === "chill") loopChill();
+        else if (currentMood === "happy") loopHappy();
+        else if (currentMood === "angry") loopAngry();
+        else loopMelancholy();
+      }
+
+      /* Disconnect <audio> element source and revoke blob URL */
+      function teardownFileAudio() {
+        if (fileMediaNode) {
+          try { fileMediaNode.disconnect(); } catch (e) {}
+          fileMediaNode = null;
+        }
+        if (fileAudio) {
+          try { URL.revokeObjectURL(fileAudio.src); } catch (e) {}
+          fileAudio.pause();
+          fileAudio.src = "";
+          fileAudio = null;
+        }
+      }
+
+      /* Disconnect MediaStreamSource and stop all mic tracks */
+      function stopMic() {
+        if (micSourceNode) {
+          try { micSourceNode.disconnect(); } catch (e) {}
+          micSourceNode = null;
+        }
+        if (micStream) {
+          micStream.getTracks().forEach((t) => t.stop());
+          micStream = null;
+        }
+        micMode = false;
+        micBtn.textContent = "Mic";
+      }
+
+      /* Mic → masterGain (not through moodFilter) */
+      async function startMic() {
+        ensureAudio();
+        stopMoodSynth();
+        teardownFileAudio();
+        fileInput.value = "";
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        micStream = stream;
+        micSourceNode = audioCtx.createMediaStreamSource(stream);
+        micSourceNode.connect(masterGain);
+        micMode = true;
+        micBtn.textContent = "Stop";
+        const v = Number(volSlider.value) / 100;
+        masterGain.gain.setValueAtTime(v * 0.85, audioCtx.currentTime);
+        if (!audioRunning) {
+          audioRunning = true;
+          toggleBtn.textContent = "Pause";
+        }
+        if (audioCtx.state === "suspended") await audioCtx.resume();
+      }
+
+      /* HUD + page background gradient */
+      function setUiMood() {
+        hudMood.textContent = moodLabels[currentMood];
+        hudBpm.textContent = moodHints[currentMood];
+        ambientEl.style.background = moods[currentMood].ambient;
+      }
+
+      /* Mood buttons: update synthesis, visuals, optional song fetch */
+      document.querySelectorAll(".mood-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          stopSongPreview();
+          currentMood = btn.dataset.mood;
+          document.querySelectorAll(".mood-btn").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          setUiMood();
+          if (audioRunning && !micMode && !fileAudio) {
+            stopMoodSynth();
+            startMoodSynth();
+          }
+          applyMoodFilter();
+          scheduleSongFetch();
+        });
+      });
+
+      /* Master transport: toggles gain + procedural synth vs file/mic */
+      toggleBtn.addEventListener("click", async () => {
+        ensureAudio();
+        if (audioCtx.state === "suspended") await audioCtx.resume();
+        audioRunning = !audioRunning;
+        const v = Number(volSlider.value) / 100;
+        if (audioRunning) {
+          toggleBtn.textContent = "Pause";
+          masterGain.gain.setValueAtTime(v * 0.85, audioCtx.currentTime);
+          if (fileAudio) {
+            fileAudio.play().catch(() => {});
+          } else if (micMode) {
+            /* ok */
+          } else {
+            startMoodSynth();
+          }
+        } else {
+          toggleBtn.textContent = "Play";
+          stopMoodSynth();
+          masterGain.gain.setValueAtTime(0, audioCtx.currentTime);
+          if (fileAudio) fileAudio.pause();
+        }
+      });
+
+      /* Toggle getUserMedia mic input */
+      micBtn.addEventListener("click", async () => {
+        try {
+          if (micMode) {
+            stopMic();
+            if (audioRunning && !fileAudio) startMoodSynth();
+            return;
+          }
+          await startMic();
+        } catch (err) {
+          alert("Microphone access was denied or unavailable.");
+        }
+      });
+
+      /* User file → createMediaElementSource → masterGain */
+      fileInput.addEventListener("change", async (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        ensureAudio();
+        stopMoodSynth();
+        stopMic();
+        teardownFileAudio();
+        const url = URL.createObjectURL(file);
+        fileAudio = new Audio();
+        fileAudio.src = url;
+        fileAudio.loop = true;
+        fileAudio.crossOrigin = "anonymous";
+        fileMediaNode = audioCtx.createMediaElementSource(fileAudio);
+        fileMediaNode.connect(masterGain);
+        const v = Number(volSlider.value) / 100;
+        masterGain.gain.setValueAtTime(v * 0.85, audioCtx.currentTime);
+        if (!audioRunning) {
+          audioRunning = true;
+          toggleBtn.textContent = "Pause";
+        }
+        try {
+          await fileAudio.play();
+        } catch (err) {
+          audioRunning = false;
+          toggleBtn.textContent = "Play";
+        }
+        if (audioCtx.state === "suspended") await audioCtx.resume();
+      });
+
+      /* Hi-DPI canvas: CSS size × devicePixelRatio */
+      function resize() {
+        const rect = canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      window.addEventListener("resize", resize);
+      resize();
+
+      let phase = 0;
+      let bloomPhase = 0;
+
+      function lerp(a, b, t) {
+        return a + (b - a) * t;
+      }
+
+      /* Smooth RGB transition when mood changes */
+      function lerpRgb(a, b, t) {
+        return [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
+      }
+
+      /*
+        Main visualization frame:
+        1) Lerp background colors toward mood
+        2) Read FFT + time domain from analyser → bass / mid / treble
+        3) Gradient fill + aurora blobs + mirrored spectrum + waveform + particles + rings + vignette
+        4) Update HUD level meter bars
+      */
+      function draw() {
+        const m = moods[currentMood];
+        const w = canvas.width / (window.devicePixelRatio || 1);
+        const h = canvas.height / (window.devicePixelRatio || 1);
+        const t = 0.04;
+        lerpBg = lerpRgb(lerpBg, m.bg, t);
+        lerpBg2 = lerpRgb(lerpBg2, m.bg2, t);
+        lerpHue = lerp(lerpHue, m.hue, t);
+
+        let avg = 0;
+        let bass = 0;
+        let mid = 0;
+        let treble = 0;
+        if (analyser && dataArray && waveArray) {
+          analyser.getByteFrequencyData(dataArray);
+          analyser.getByteTimeDomainData(waveArray);
+          let sum = 0;
+          const len = dataArray.length;
+          for (let i = 0; i < len; i++) sum += dataArray[i];
+          avg = sum / len / 255;
+          /* Rough frequency bands from FFT bins */
+          const i0 = 0;
+          const i1 = Math.floor(len * 0.08);
+          const i2 = Math.floor(len * 0.35);
+          let sb = 0,
+            sm = 0,
+            st = 0;
+          for (let i = i0; i < i1; i++) sb += dataArray[i];
+          for (let i = i1; i < i2; i++) sm += dataArray[i];
+          for (let i = i2; i < len; i++) st += dataArray[i];
+          bass = sb / ((i1 - i0) * 255);
+          mid = sm / ((i2 - i1) * 255);
+          treble = st / ((len - i2) * 255);
+        }
+
+        const vi = vizIntensity;
+        phase += 0.01 * m.speed * vi * (1 + avg * 2.5);
+        bloomPhase += 0.015 * (1 + mid);
+
+        const g = ctx.createLinearGradient(0, 0, w, h);
+        g.addColorStop(0, `rgb(${lerpBg[0]}, ${lerpBg[1]}, ${lerpBg[2]})`);
+        g.addColorStop(1, `rgb(${lerpBg2[0]}, ${lerpBg2[1]}, ${lerpBg2[2]})`);
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, w, h);
+
+        const cx = w * 0.5 + Math.sin(phase * 0.7) * w * 0.04 * vi;
+        const cy = h * 0.45 + Math.cos(phase * 0.9) * h * 0.04;
+
+        for (let a = 0; a < 3; a++) {
+          const ox = Math.sin(bloomPhase + a * 2.1) * w * 0.15;
+          const oy = Math.cos(bloomPhase * 0.8 + a) * h * 0.12;
+          const rad = ctx.createRadialGradient(cx + ox, cy + oy, 0, cx + ox, cy + oy, Math.min(w, h) * (0.45 + a * 0.08));
+          const hue = (lerpHue + a * 25 + bass * 40) % 360;
+          rad.addColorStop(0, `hsla(${hue}, ${m.sat}%, 55%, ${0.12 * vi + bass * 0.15})`);
+          rad.addColorStop(0.5, `hsla(${(hue + 40) % 360}, ${m.sat * 0.8}%, 40%, ${0.04 * vi})`);
+          rad.addColorStop(1, "transparent");
+          ctx.fillStyle = rad;
+          ctx.fillRect(0, 0, w, h);
+        }
+
+        const midY = h * 0.5;
+        const specBins = 80;
+        const binW = w / specBins;
+        /* Mirrored spectrum: screen blend for glow */
+        ctx.save();
+        ctx.globalCompositeOperation = "screen";
+        for (let i = 0; i < specBins; i++) {
+          const len = dataArray ? dataArray.length : 1;
+          const idx = Math.min(len - 1, Math.floor((i / specBins) * len));
+          const v = dataArray ? dataArray[idx] / 255 : 0;
+          const bh = v * h * 0.42 * vi;
+          const hue = (lerpHue + i * 2.2 + mid * 30) % 360;
+          const grad = ctx.createLinearGradient(0, midY - bh, 0, midY);
+          grad.addColorStop(0, `hsla(${hue}, ${m.sat}%, 62%, ${0.15 + v * 0.55})`);
+          grad.addColorStop(1, `hsla(${hue}, ${m.sat}%, 45%, 0)`);
+          ctx.fillStyle = grad;
+          ctx.fillRect(i * binW, midY - bh, binW - 0.5, bh);
+          const grad2 = ctx.createLinearGradient(0, midY, 0, midY + bh);
+          grad2.addColorStop(0, `hsla(${hue}, ${m.sat}%, 45%, 0)`);
+          grad2.addColorStop(1, `hsla(${hue}, ${m.sat}%, 55%, ${0.12 + v * 0.45})`);
+          ctx.fillStyle = grad2;
+          ctx.fillRect(i * binW, midY, binW - 0.5, bh);
+        }
+        ctx.restore();
+
+        /* Oscilloscope-style waveform (time domain) */
+        if (waveArray) {
+          ctx.lineJoin = "round";
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          const slice = waveArray.length;
+          for (let i = 0; i < slice; i++) {
+            const x = (i / (slice - 1)) * w;
+            const v = waveArray[i] / 128 - 1;
+            const y = midY + v * h * 0.22 * vi * (1 + treble * 0.5);
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+          ctx.strokeStyle = `hsla(${lerpHue}, ${m.sat}%, 75%, ${0.35 + avg * 0.45})`;
+          ctx.shadowColor = `hsla(${lerpHue}, 90%, 60%, 0.5)`;
+          ctx.shadowBlur = 12 + bass * 24;
+          ctx.lineWidth = 2.2 + bass * 4;
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        }
+
+        /* Additive particles in a ring */
+        const particles = 72;
+        ctx.globalCompositeOperation = "lighter";
+        for (let i = 0; i < particles; i++) {
+          const p = i / particles;
+          const ang = p * Math.PI * 2 + phase;
+          const rr = Math.min(w, h) * (0.18 + 0.14 * Math.sin(ang * 4 + bass * 5) + treble * 0.2);
+          const px = cx + Math.cos(ang) * rr * (0.92 + avg * 0.35);
+          const py = cy + Math.sin(ang) * rr * (0.92 + avg * 0.35);
+          const hue = (m.hue2 + p * 50 + bass * 35) % 360;
+          const sz = (3 + bass * 32 + Math.sin(phase + i) * 5 * m.pulse) * vi;
+          const a = 0.08 + treble * 0.35;
+          ctx.beginPath();
+          ctx.fillStyle = `hsla(${hue}, ${m.sat}%, 58%, ${a})`;
+          ctx.arc(px, py, sz, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalCompositeOperation = "source-over";
+
+        /* Arc segments (incomplete circles) for depth */
+        const rings = 6;
+        for (let r = 0; r < rings; r++) {
+          const rr = (0.1 + r * 0.065) * Math.min(w, h) * (1 + avg * 0.55);
+          ctx.strokeStyle = `hsla(${lerpHue}, ${m.sat}%, 62%, ${0.06 + bass * 0.22})`;
+          ctx.lineWidth = 1.2 + bass * 5;
+          ctx.beginPath();
+          ctx.arc(cx, cy, rr, phase * 0.4 + r * 0.5, Math.PI * 2 + phase * 0.4 + r * 0.5);
+          ctx.stroke();
+        }
+
+        /* Darken edges */
+        ctx.fillStyle = "rgba(0,0,0,0)";
+        const vignette = ctx.createRadialGradient(cx, cy, Math.min(w, h) * 0.25, cx, cy, Math.max(w, h) * 0.75);
+        vignette.addColorStop(0, "transparent");
+        vignette.addColorStop(1, "rgba(0,0,0,0.55)");
+        ctx.fillStyle = vignette;
+        ctx.fillRect(0, 0, w, h);
+
+        /* DOM-based VU columns (right side of HUD) */
+        if (levelBars.length && dataArray) {
+          const peak = Math.min(1, avg * 2.2 + bass * 0.5);
+          levelBars.forEach((bar, i) => {
+            const thresh = i / levelBars.length;
+            const on = peak > thresh;
+            bar.style.height = `${4 + (on ? peak : peak * 0.3) * 32 * (1 - i / levelBars.length)}px`;
+            bar.style.background = on
+              ? `hsla(${lerpHue}, 42%, 62%, ${0.4 + peak * 0.45})`
+              : "rgba(245, 240, 232, 0.12)";
+          });
+        }
+
+        requestAnimationFrame(draw);
+      }
+
+      /* First paint: sync labels + start audio context + animation loop */
+      setUiMood();
+      ensureAudio();
+      draw();
+    })();
+  </script>
+</body>
+</html>
